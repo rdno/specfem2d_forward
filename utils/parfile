@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Basic Par_file reader/writer
+
+Checks data types of the parameters, as well.
+
+Ridvan Orsvuran, 2021
+"""
+
+import argparse
+import re
+
+
+class Double(float):
+    def __new__(self, value, exp=0):
+        return float.__new__(self, value)
+
+    def __init__(self, value, exp=0):
+        float.__init__(value)
+        self.exp = exp
+
+    def __str__(self):
+        return f"{float.__str__(self)}d{self.exp}"
+
+
+def double(val):
+    if isinstance(val, str):
+        if 'd' in val:
+            val, exp = val.split("d")
+            return Double(val, int(exp))
+    return Double(val)
+
+
+def parfile_bool(val):
+    if val == ".true.":
+        return True
+    elif val == ".false.":
+        return False
+    else:
+        raise ValueError("Not a Par_file bool")
+
+
+def typed_value(value_str):
+    val = value_str.strip()
+    param_types = [parfile_bool, int, double, float, str]
+    for param_type in param_types:
+        try:
+            typed_val = param_type(val)
+            return typed_val
+        except ValueError:
+            continue
+
+    # This shouldn't happen, str should catch all.
+    raise Exception(f"Type couldn't be determined for {value_str}")
+
+
+def parse(content):
+    values = {}
+    for line in content.split("\n"):
+        if not line.startswith("#"):
+            # strip comments at the end of the line
+            if "=" in line:
+                line = line.split("#")[0]
+                name, val = line.split("=")
+                values[name.strip()] = typed_value(val)
+    return values
+
+
+def update_file(filename, values):
+    """Updates the parameter file with values.
+    Without disturbing the file contents too much.
+    """
+    def as_str(value):
+        if isinstance(value, bool):
+            return f".{str(value).lower()}."
+        return str(value)
+
+    with open(filename) as f:
+        contents = f.read()
+
+    for param, value in values.items():
+        pat = re.compile(
+            rf"(^{param}\s*=\s*)([^#$\s]+)",
+            re.MULTILINE)
+        contents = pat.sub(rf"\g<1>{as_str(value)}", contents)
+
+    with open(filename, "w") as f:
+        f.write(contents)
+
+
+class SpecfemParameters:
+    def __init__(self):
+        self.values = {}
+        self.filename = None
+
+    def read_file(self, filename):
+        self.filename = filename
+        with open(self.filename, 'r') as f:
+            self.values = parse(f.read())
+
+    def get_value(self, param):
+        try:
+            return self.values[param]
+        except KeyError:
+            raise Exception(f"Parameter {param} not found.")
+
+    def set_value(self, param, value):
+        old_value = self.get_value(param)
+        new_value = typed_value(value)
+        print(f"Setting {param} to {new_value}")
+        if type(old_value) != type(new_value):
+            raise Exception(f"Old value type is '{type(old_value).__name__}' instead of '{type(new_value).__name__}'.")  # NOQA
+        self.values[param] = new_value
+
+    def update_file(self, params=None):
+        # Update all parameters
+        if params is None:
+            update_file(self.filename, self.values)
+
+        # Update subsection of all parameters
+        values = {param: val for param, val in self.values.items()
+                  if param in params}
+        update_file(self.filename, values)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Par_file tool")
+    parser.add_argument("-f", "--filename",
+                        default="DATA/Par_file",
+                        help="filename (default: DATA/Par_file)")
+    parser.add_argument("-g", "--get",
+                        metavar="PARAM",
+                        action="append",
+                        help="Get a value of a parameter")
+    parser.add_argument("-s", "--set",
+                        nargs=2,
+                        metavar=("PARAM", "VALUE"),
+                        action="append",
+                        help="Set a value of a parameter")
+    parser.add_argument("-l", "--list-params",
+                        action="store_true",
+                        help="list all parameter")
+    args = parser.parse_args()
+
+    p = SpecfemParameters()
+    p.read_file(args.filename)
+
+    if args.get:
+        for param in args.get:
+            print(f"{param} = {p.get_value(param)}")
+    elif args.set:
+        params = []
+        for set_opt in args.set:
+            param, value = set_opt
+            p.set_value(param, value)
+            params.append(param)
+        p.update_file(params=params)
+    elif args.list_params:
+        for param in p.values.keys():
+            print(param)
