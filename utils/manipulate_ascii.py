@@ -19,6 +19,6 @@ for i in range(rows):
     if XMIN <= x <= XMAX and ZMIN <= z <= ZMAX:
         # half Vp and Vs
         model[i, 3] = vp / 2.0
-        model[i, 4] = vp / 2.0
+        model[i, 4] = vs / 2.0
 
 np.savetxt("./DATA/proc000000_rho_vp_vs.dat", model)
